@@ -2,49 +2,71 @@
 
 ## Overview
 
-The extension runs a dual HTTP/WebSocket server inside VS Code's Node.js environment.
+The extension runs a dual HTTP/WebSocket server inside VS Code's Node.js environment. Since each VS Code window runs in an isolated process with separate memory, the extension uses a host/client architecture to support multiple windows.
+
+## Host/Client Model
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    VS Code Extension                     │
-│  ┌─────────────────┐    ┌─────────────────────────────┐ │
-│  │   HTTP Server   │    │    WebSocket Server (ws)    │ │
-│  │    (Node.js)    │    │    Real-time messaging      │ │
-│  └────────┬────────┘    └──────────────┬──────────────┘ │
-│           │                            │                 │
-│           └────────────┬───────────────┘                │
-│                        ▼                                 │
-│              vscode.commands.executeCommand              │
-│                        │                                 │
-│                        ▼                                 │
-│                  Copilot Chat                            │
-└─────────────────────────────────────────────────────────┘
+Mobile Device ──HTTP/WS──▶ Host Window (port 3847)
+                              │
+                              ├── Host's own workspace
+                              │
+                              └──WS──▶ Client Window 1 (/workspace)
+                              └──WS──▶ Client Window 2 (/workspace)
 ```
+
+1. **First window (Host)**: Starts HTTP server on port 3847, serves mobile UI, manages all workspace connections
+2. **Additional windows (Clients)**: Detect port in use, connect to host via WebSocket at `/workspace`, register their workspace
+
+### Key Components
+
+- `startAsHost(port)`: Creates HTTP server + WebSocket server, registers own workspace
+- `startAsClient(port)`: Connects to existing host, registers workspace via WebSocket
+- `tryStartServer(port)`: Tests if port available; if EADDRINUSE, becomes client instead
+- `workspaceClients`: Map of workspace ID → WebSocket connection (for forwarding prompts)
+- `mobileClients`: Set of mobile device WebSocket connections
 
 ## HTTP Endpoints
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/` | GET | Serves mobile web UI |
-| `/api/health` | GET | Health check + workspace info |
-| `/api/prompt` | POST | Send prompt to chat |
-| `/api/command` | POST | Execute VS Code command |
-| `/api/context` | GET | Get workspace context |
+| Endpoint          | Method | Purpose                   |
+| ----------------- | ------ | ------------------------- |
+| `/`               | GET    | Serves mobile web UI      |
+| `/api/health`     | GET    | Health check + workspace  |
+| `/api/workspaces` | GET    | List connected workspaces |
 
 ## WebSocket Protocol
 
-### Client → Server
+### Message Types
+
+| Type         | Direction     | Purpose                                |
+| ------------ | ------------- | -------------------------------------- |
+| `register`   | Client → Host | Register workspace with host           |
+| `unregister` | Client → Host | Remove workspace on disconnect         |
+| `workspaces` | Host → Mobile | List of all connected workspaces       |
+| `prompt`     | Mobile → Host | Send prompt to specific workspace      |
+| `execute`    | Host → Client | Forward prompt to client for execution |
+| `history`    | Host → Mobile | Chat history for workspace             |
+| `status`     | Host → Mobile | Status updates                         |
+
+### Mobile → Host
 
 ```json
-{ "type": "prompt", "content": "your prompt", "mode": "agent" }
-{ "type": "command", "command": "workbench.action.files.save" }
+{ "type": "prompt", "content": "your prompt", "workspaceId": "file:///path/to/workspace" }
 ```
 
-### Server → Client
+### Host → Mobile
 
 ```json
-{ "type": "history", "data": [...messages] }
+{ "type": "workspaces", "data": [{ "id": "...", "name": "...", "uri": "..." }] }
+{ "type": "history", "data": [...], "workspaceId": "..." }
 { "type": "status", "content": "Processing..." }
+```
+
+### Host ↔ Client
+
+```json
+{ "type": "register", "workspace": { "id": "...", "name": "...", "uri": "..." } }
+{ "type": "execute", "content": "prompt text", "workspaceId": "..." }
 ```
 
 ## Network Binding
@@ -57,26 +79,26 @@ server.listen(port, '0.0.0.0', callback);
 
 ## IP Detection
 
-Uses `os.networkInterfaces()` to find the Mac's local IP for QR code generation:
+Uses `os.networkInterfaces()` to find the local IP for QR code generation:
 
 ```typescript
 function getLocalIP(): string {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return '127.0.0.1';
+	const interfaces = os.networkInterfaces();
+	for (const name of Object.keys(interfaces)) {
+		for (const iface of interfaces[name] || []) {
+			if (iface.family === 'IPv4' && !iface.internal) {
+				return iface.address;
+			}
+		}
+	}
+	return '127.0.0.1';
 }
 ```
 
 ## Dependencies
 
 - `ws` - WebSocket server implementation
-- `qrcode` - QR code generation (loaded via CDN in webview)
+- `qrcode` - QR code generation
 
 ## State Management
 
@@ -85,12 +107,17 @@ Global state managed at module level:
 ```typescript
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
-let clients: Set<WebSocket> = new Set();
-let chatHistory: Array<{ role: string; content: string; timestamp: number }> = [];
+let clientWs: WebSocket | null = null;
+let isHost = false;
+const mobileClients: Set<WebSocket> = new Set();
+const workspaceClients: Map<string, WebSocket> = new Map();
+const workspaces: Map<string, Workspace> = new Map();
+const chatHistories: Map<string, ChatHistoryEntry[]> = new Map();
 ```
 
 ## Lifecycle
 
 1. **Activation**: Extension activates on `onStartupFinished`
 2. **Auto-start**: Server starts if `copilotRemote.autoStart` is true
-3. **Deactivation**: Server stops, WebSocket connections closed
+3. **Port check**: If port 3847 in use, becomes client instead of host
+4. **Deactivation**: Server/client stops, WebSocket connections closed

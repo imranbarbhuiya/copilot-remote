@@ -14,10 +14,11 @@ interface Workspace {
 }
 
 interface ChatMessage {
-	type: 'prompt' | 'response' | 'status' | 'history' | 'command' | 'workspaces';
+	type: 'prompt' | 'response' | 'status' | 'history' | 'command' | 'workspaces' | 'register' | 'unregister' | 'execute';
 	content?: string;
 	command?: string;
 	workspaceId?: string;
+	workspace?: Workspace;
 	data?: unknown;
 }
 
@@ -30,26 +31,26 @@ interface ChatHistoryEntry {
 
 let server: http.Server | null = null;
 let wss: WebSocketServer | null = null;
+let clientWs: WebSocket | null = null;
 let actualPort = 3_847;
-const clients: Set<WebSocket> = new Set();
+let isHost = false;
+const mobileClients: Set<WebSocket> = new Set();
+const workspaceClients: Map<string, WebSocket> = new Map();
 const workspaces: Map<string, Workspace> = new Map();
 const chatHistories: Map<string, ChatHistoryEntry[]> = new Map();
+
+const outputChannel = vscode.window.createOutputChannel('Copilot Remote');
+
+function log(message: string) {
+	const timestamp = new Date().toISOString();
+	outputChannel.appendLine(`[${timestamp}] ${message}`);
+}
 
 function getLocalIP(): string {
 	const interfaces = os.networkInterfaces();
 	for (const name of Object.keys(interfaces))
 		for (const iface of interfaces[name] ?? []) if (iface.family === 'IPv4' && !iface.internal) return iface.address;
-
 	return '127.0.0.1';
-}
-
-function broadcast(message: ChatMessage) {
-	const data = JSON.stringify(message);
-	for (const client of clients) if (client.readyState === WebSocket.OPEN) client.send(data);
-}
-
-function broadcastWorkspaces() {
-	broadcast({ type: 'workspaces', data: Array.from(workspaces.values()) });
 }
 
 function getWorkspaceId(): string {
@@ -62,25 +63,57 @@ function getWorkspaceName(): string {
 	return vscode.workspace.name ?? 'Unknown';
 }
 
+function getWorkspaceInfo(): Workspace {
+	return {
+		id: getWorkspaceId(),
+		name: getWorkspaceName(),
+		uri: vscode.workspace.workspaceFolders?.[0]?.uri.toString() ?? '',
+	};
+}
+
+function broadcastToMobile(message: ChatMessage) {
+	const data = JSON.stringify(message);
+	for (const client of mobileClients) if (client.readyState === WebSocket.OPEN) client.send(data);
+}
+
+function broadcastWorkspaces() {
+	broadcastToMobile({ type: 'workspaces', data: Array.from(workspaces.values()) });
+}
+
 function getChatHistory(workspaceId: string): ChatHistoryEntry[] {
 	if (!chatHistories.has(workspaceId)) chatHistories.set(workspaceId, []);
 	return chatHistories.get(workspaceId)!;
 }
 
-async function executeChat(prompt: string, workspaceId: string): Promise<void> {
-	const history = getChatHistory(workspaceId);
-	history.push({ role: 'user', content: prompt, timestamp: Date.now(), workspaceId });
-	broadcast({ type: 'history', data: history, workspaceId });
-	broadcast({ type: 'status', content: 'Processing...' });
+async function executeLocalChat(prompt: string, workspaceId: string): Promise<void> {
+	log(`executeLocalChat: prompt="${prompt.slice(0, 50)}..." for workspace=${workspaceId}`);
 
 	try {
 		await vscode.commands.executeCommand('workbench.action.chat.open', {
 			query: prompt,
 			mode: 'agent',
 		});
+		log(`Chat opened successfully`);
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+		log(`Error opening chat: ${errorMsg}`);
+	}
+}
 
-		broadcast({ type: 'status', content: 'Prompt sent to Copilot Chat' });
+function handlePromptOnHost(prompt: string, workspaceId: string) {
+	log(`handlePromptOnHost: workspaceId=${workspaceId}`);
 
+	const history = getChatHistory(workspaceId);
+	history.push({ role: 'user', content: prompt, timestamp: Date.now(), workspaceId });
+	broadcastToMobile({ type: 'history', data: history, workspaceId });
+	broadcastToMobile({ type: 'status', content: 'Processing...' });
+
+	const myWorkspaceId = getWorkspaceId();
+
+	if (workspaceId === myWorkspaceId) {
+		log(`Prompt is for host workspace, executing locally`);
+		void executeLocalChat(prompt, workspaceId);
+		broadcastToMobile({ type: 'status', content: 'Prompt sent to Copilot Chat' });
 		setTimeout(() => {
 			history.push({
 				role: 'assistant',
@@ -88,58 +121,33 @@ async function executeChat(prompt: string, workspaceId: string): Promise<void> {
 				timestamp: Date.now(),
 				workspaceId,
 			});
-			broadcast({ type: 'history', data: history, workspaceId });
+			broadcastToMobile({ type: 'history', data: history, workspaceId });
 		}, 1_000);
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-		broadcast({ type: 'status', content: `Error: ${errorMsg}` });
+	} else {
+		const clientWs = workspaceClients.get(workspaceId);
+		if (clientWs?.readyState === WebSocket.OPEN) {
+			log(`Forwarding prompt to client workspace: ${workspaceId}`);
+			clientWs.send(JSON.stringify({ type: 'execute', content: prompt, workspaceId }));
+			broadcastToMobile({ type: 'status', content: 'Prompt sent to Copilot Chat' });
+			setTimeout(() => {
+				history.push({
+					role: 'assistant',
+					content: '[Response visible in VS Code - check the chat panel]',
+					timestamp: Date.now(),
+					workspaceId,
+				});
+				broadcastToMobile({ type: 'history', data: history, workspaceId });
+			}, 1_000);
+		} else {
+			log(`No client found for workspace: ${workspaceId}`);
+			broadcastToMobile({ type: 'status', content: 'Error: Workspace not connected' });
+		}
 	}
 }
 
-async function executeCommand(command: string, args?: unknown[]): Promise<void> {
-	try {
-		await vscode.commands.executeCommand(command, ...(args ?? []));
-		broadcast({ type: 'status', content: `Executed: ${command}` });
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-		broadcast({ type: 'status', content: `Command error: ${errorMsg}` });
-	}
-}
-
-function registerWorkspace() {
-	const id = getWorkspaceId();
-	const name = getWorkspaceName();
-	const uri = vscode.workspace.workspaceFolders?.[0]?.uri.toString() ?? '';
-
-	workspaces.set(id, { id, name, uri });
-	broadcastWorkspaces();
-
-	return id;
-}
-
-function unregisterWorkspace() {
-	const id = getWorkspaceId();
-	workspaces.delete(id);
-	broadcastWorkspaces();
-}
-
-function startServer(): void {
-	if (server) {
-		registerWorkspace();
-		return;
-	}
-
-	const config = vscode.workspace.getConfiguration('copilotRemote');
-	const basePort = config.get<number>('port', 3_847);
-
-	tryStartServer(basePort, basePort + 10);
-}
-
-function tryStartServer(port: number, maxPort: number): void {
-	if (port > maxPort) {
-		vscode.window.showErrorMessage('Could not find an available port in range 3847-3857');
-		return;
-	}
+function startAsHost(port: number): void {
+	log(`Starting as HOST on port ${port}`);
+	isHost = true;
 
 	server = http.createServer((req, res) => {
 		res.setHeader('Access-Control-Allow-Origin', '*');
@@ -170,88 +178,203 @@ function tryStartServer(port: number, maxPort: number): void {
 			return;
 		}
 
-		if (req.url === '/api/prompt' && req.method === 'POST') {
-			let body = '';
-			req.on('data', (chunk) => (body += chunk));
-			req.on('end', async () => {
-				try {
-					const { prompt, workspaceId } = JSON.parse(body);
-					await executeChat(prompt, workspaceId ?? getWorkspaceId());
-					res.writeHead(200, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ success: true }));
-				} catch {
-					res.writeHead(400, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ error: 'Invalid request' }));
-				}
-			});
-			return;
-		}
-
 		res.writeHead(404);
 		res.end('Not found');
 	});
 
 	wss = new WebSocketServer({ server });
 
-	wss.on('connection', (ws) => {
-		clients.add(ws);
+	wss.on('connection', (ws, req) => {
+		const isWorkspaceClient = req.url === '/workspace';
 
-		ws.send(JSON.stringify({ type: 'workspaces', data: Array.from(workspaces.values()) }));
-		ws.send(JSON.stringify({ type: 'status', content: 'Connected to VS Code' }));
+		if (isWorkspaceClient) {
+			log(`Workspace client connected`);
 
-		ws.on('message', async (data) => {
-			try {
-				// eslint-disable-next-line @typescript-eslint/no-base-to-string
-				const message: ChatMessage = JSON.parse(data.toString());
+			ws.on('message', (data: Buffer) => {
+				try {
+					const message: ChatMessage = JSON.parse(String(data));
 
-				if (message.type === 'prompt' && message.content) {
-					const wsId = message.workspaceId ?? getWorkspaceId();
-					await executeChat(message.content, wsId);
-				} else if (message.type === 'command' && message.command) await executeCommand(message.command);
-			} catch (error) {
-				console.error('WebSocket message error:', error);
-			}
-		});
+					if (message.type === 'register' && message.workspace) {
+						log(`Registering workspace: ${message.workspace.name} (${message.workspace.id})`);
+						workspaces.set(message.workspace.id, message.workspace);
+						workspaceClients.set(message.workspace.id, ws);
+						broadcastWorkspaces();
+					} else if (message.type === 'unregister' && message.workspaceId) {
+						log(`Unregistering workspace: ${message.workspaceId}`);
+						workspaces.delete(message.workspaceId);
+						workspaceClients.delete(message.workspaceId);
+						broadcastWorkspaces();
+					}
+				} catch (error) {
+					log(`Error processing workspace client message: ${error}`);
+				}
+			});
 
-		ws.on('close', () => {
-			clients.delete(ws);
-		});
-	});
-
-	server.once('error', (err: NodeJS.ErrnoException) => {
-		if (err.code === 'EADDRINUSE') {
-			server = null;
-			wss = null;
-			tryStartServer(port + 1, maxPort);
+			ws.on('close', () => {
+				log(`Workspace client disconnected`);
+				for (const [id, client] of workspaceClients.entries()) {
+					if (client === ws) {
+						workspaces.delete(id);
+						workspaceClients.delete(id);
+						broadcastWorkspaces();
+						break;
+					}
+				}
+			});
 		} else {
-			server = null;
-			wss = null;
-			vscode.window.showErrorMessage(`Server error: ${err.message}`);
+			log(`Mobile client connected`);
+			mobileClients.add(ws);
+
+			ws.send(JSON.stringify({ type: 'workspaces', data: Array.from(workspaces.values()) }));
+			ws.send(JSON.stringify({ type: 'status', content: 'Connected to VS Code' }));
+
+			ws.on('message', async (data: Buffer) => {
+				try {
+					const message: ChatMessage = JSON.parse(String(data));
+
+					if (message.type === 'prompt' && message.content) {
+						const wsId = message.workspaceId ?? getWorkspaceId();
+						handlePromptOnHost(message.content, wsId);
+					}
+				} catch (error) {
+					log(`Error processing mobile client message: ${error}`);
+				}
+			});
+
+			ws.on('close', () => {
+				log(`Mobile client disconnected`);
+				mobileClients.delete(ws);
+			});
 		}
 	});
 
 	server.listen(port, '0.0.0.0', () => {
+		log(`Server listening on port ${port}`);
 		actualPort = port;
-		registerWorkspace();
+
+		const wsInfo = getWorkspaceInfo();
+		workspaces.set(wsInfo.id, wsInfo);
+		log(`Registered host workspace: ${wsInfo.name}`);
 
 		const ip = getLocalIP();
 		const url = `http://${ip}:${port}`;
 
-		vscode.window
+		void vscode.window
 			.showInformationMessage(`Copilot Remote started at ${url}`, 'Open in Browser', 'Show QR')
 			// eslint-disable-next-line promise/prefer-await-to-then
 			.then((selection) => {
-				if (selection === 'Open in Browser') vscode.env.openExternal(vscode.Uri.parse(url));
-				else if (selection === 'Show QR') vscode.commands.executeCommand('copilot-remote.showQR');
+				if (selection === 'Open in Browser') void vscode.env.openExternal(vscode.Uri.parse(url));
+				else if (selection === 'Show QR') void vscode.commands.executeCommand('copilot-remote.showQR');
 			});
 	});
 }
 
-function stopServer(): void {
-	unregisterWorkspace();
+function startAsClient(port: number): void {
+	log(`Starting as CLIENT, connecting to port ${port}`);
+	isHost = false;
 
-	if (workspaces.size > 0) {
-		vscode.window.showInformationMessage('Workspace unregistered. Server still running for other workspaces.');
+	const wsUrl = `ws://127.0.0.1:${port}/workspace`;
+	log(`Connecting to: ${wsUrl}`);
+
+	clientWs = new WebSocket(wsUrl);
+
+	clientWs.on('open', () => {
+		log(`Connected to host server`);
+		const wsInfo = getWorkspaceInfo();
+		clientWs!.send(JSON.stringify({ type: 'register', workspace: wsInfo }));
+		log(`Registered with host: ${wsInfo.name}`);
+
+		actualPort = port;
+		vscode.window.showInformationMessage(`Copilot Remote: Connected to existing server (workspace: ${wsInfo.name})`);
+	});
+
+	clientWs.on('message', (data: Buffer) => {
+		try {
+			const message: ChatMessage = JSON.parse(String(data));
+
+			if (message.type === 'execute' && message.content) {
+				log(`Received execute command: ${message.content.slice(0, 50)}...`);
+				void executeLocalChat(message.content, message.workspaceId ?? getWorkspaceId());
+			}
+		} catch (error) {
+			log(`Error processing message from host: ${error}`);
+		}
+	});
+
+	clientWs.on('close', () => {
+		log(`Disconnected from host server`);
+		clientWs = null;
+		setTimeout(() => {
+			if (!clientWs && !server) {
+				log(`Attempting to reconnect...`);
+				startServer();
+			}
+		}, 2_000);
+	});
+
+	clientWs.on('error', (error) => {
+		log(`WebSocket error: ${error.message}`);
+	});
+}
+
+function tryStartServer(port: number, maxPort: number): void {
+	const wsName = getWorkspaceName();
+	log(`tryStartServer port=${port} for workspace: ${wsName}`);
+
+	if (port > maxPort) {
+		log(`Exceeded max port range, giving up`);
+		vscode.window.showErrorMessage('Could not start Copilot Remote');
+		return;
+	}
+
+	const testServer = http.createServer();
+
+	testServer.once('error', (err: NodeJS.ErrnoException) => {
+		if (err.code === 'EADDRINUSE') {
+			log(`Port ${port} in use, connecting as client`);
+			testServer.close();
+			startAsClient(port);
+		} else {
+			log(`Server error: ${err.message}`);
+			testServer.close();
+			tryStartServer(port + 1, maxPort);
+		}
+	});
+
+	testServer.once('listening', () => {
+		log(`Port ${port} is available`);
+		testServer.close(() => {
+			startAsHost(port);
+		});
+	});
+
+	testServer.listen(port, '0.0.0.0');
+}
+
+function startServer(): void {
+	const wsName = getWorkspaceName();
+	log(`startServer called from workspace: ${wsName}`);
+
+	if (server || clientWs) {
+		log(`Already running (server=${Boolean(server)}, clientWs=${Boolean(clientWs)})`);
+		return;
+	}
+
+	const config = vscode.workspace.getConfiguration('copilotRemote');
+	const basePort = config.get<number>('port', 3_847);
+
+	tryStartServer(basePort, basePort + 10);
+}
+
+function stopServer(): void {
+	log(`stopServer called`);
+
+	if (clientWs) {
+		const wsInfo = getWorkspaceInfo();
+		clientWs.send(JSON.stringify({ type: 'unregister', workspaceId: wsInfo.id }));
+		clientWs.close();
+		clientWs = null;
+		vscode.window.showInformationMessage('Copilot Remote: Disconnected');
 		return;
 	}
 
@@ -263,7 +386,10 @@ function stopServer(): void {
 		server.close();
 		server = null;
 	}
-	clients.clear();
+	mobileClients.clear();
+	workspaceClients.clear();
+	workspaces.clear();
+	isHost = false;
 	vscode.window.showInformationMessage('Copilot Remote server stopped');
 }
 
@@ -320,12 +446,19 @@ async function showQRCode(): Promise<void> {
 let statusBarItem: vscode.StatusBarItem;
 
 export function activate(context: vscode.ExtensionContext) {
+	const wsName = getWorkspaceName();
+	const wsId = getWorkspaceId();
+	log(`========== ACTIVATE ==========`);
+	log(`Workspace name: ${wsName}`);
+	log(`Workspace ID: ${wsId}`);
+
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	statusBarItem.command = 'copilot-remote.showQR';
 	statusBarItem.text = `$(broadcast) Remote`;
 	statusBarItem.tooltip = 'Copilot Remote - Click to show QR';
 	statusBarItem.show();
 	context.subscriptions.push(statusBarItem);
+	context.subscriptions.push(outputChannel);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('copilot-remote.start', startServer),
@@ -334,13 +467,13 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	const config = vscode.workspace.getConfiguration('copilotRemote');
-	if (config.get<boolean>('autoStart', true)) startServer();
+	if (config.get<boolean>('autoStart', true)) {
+		log(`autoStart enabled, calling startServer`);
+		startServer();
+	}
 }
 
 export function deactivate() {
-	unregisterWorkspace();
-	if (workspaces.size === 0) {
-		if (wss) wss.close();
-		if (server) server.close();
-	}
+	log(`========== DEACTIVATE ==========`);
+	stopServer();
 }

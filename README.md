@@ -1,6 +1,6 @@
 # Copilot Remote Control
 
-Control VS Code's Copilot Chat from your phone. Send prompts and commands to your Mac's VS Code agents while away from your keyboard.
+Control VS Code's Copilot Chat from your phone. Send prompts and commands to your VS Code agents while away from your keyboard.
 
 ## Features
 
@@ -42,10 +42,10 @@ The server auto-starts when VS Code opens. You can also:
 
 ### 5. Connect from Phone
 
-1. Make sure your phone is on the same WiFi as your Mac
+1. Make sure your phone is on the same WiFi as your computer
 2. Run "Copilot Remote: Show QR Code for Phone"
 3. Scan the QR with your phone camera
-4. Or manually open `http://<your-mac-ip>:3847`
+4. Or manually open `http://<your-ip>:3847`
 
 ## Usage
 
@@ -54,7 +54,7 @@ The server auto-starts when VS Code opens. You can also:
 1. Select mode (Agent, Ask, Edit) at the top
 2. Type your prompt or use quick action buttons
 3. Hit send - the prompt goes to VS Code's Copilot Chat
-4. Check VS Code on your Mac for the response
+4. Check VS Code on your computer for the response
 
 ### Quick Actions:
 
@@ -118,7 +118,7 @@ bun run compile
 ### Phone can't connect
 
 1. Check both devices are on same WiFi
-2. Check Mac firewall allows incoming connections on port 3847
+2. Check your firewall allows incoming connections on port 3847
 3. Try the IP address shown in the QR code panel
 
 ### Server won't start

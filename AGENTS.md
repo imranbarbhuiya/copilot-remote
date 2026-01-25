@@ -1,12 +1,13 @@
 # Copilot Remote
 
-VS Code extension that exposes an HTTP/WebSocket server to control Copilot Chat from mobile devices.
+VS Code extension that exposes an HTTP/WebSocket server to control Copilot Chat from mobile devices. Supports multiple VS Code windows with a host/client architecture.
 
 ## Commands
 
-| Task    | Command        |
-| ------- | -------------- |
-| Package | `vsce package` |
+| Task    | Command           |
+| ------- | ----------------- |
+| Compile | `npm run compile` |
+| Package | `vsce package`    |
 
 ## Documentation
 
