@@ -179,6 +179,27 @@ function startAsHost(port: number): void {
 			return;
 		}
 
+		if (req.url === '/api/models' && req.method === 'GET') {
+			void (async () => {
+				try {
+					const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+					const modelList = models.map((m) => ({
+						id: m.id,
+						name: m.name,
+						family: m.family,
+						vendor: m.vendor,
+					}));
+					res.writeHead(200, { 'Content-Type': 'application/json' });
+					res.end(JSON.stringify(modelList));
+				} catch (error) {
+					log(`Error fetching models: ${error}`);
+					res.writeHead(500, { 'Content-Type': 'application/json' });
+					res.end(JSON.stringify({ error: 'Failed to fetch models' }));
+				}
+			})();
+			return;
+		}
+
 		res.writeHead(404);
 		res.end('Not found');
 	});

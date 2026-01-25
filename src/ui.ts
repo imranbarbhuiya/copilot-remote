@@ -503,8 +503,7 @@ export function getMobileUI(workspaceName: string): string {
 				<path d="M8 18h8"/>
 			</svg>
 			<select id="modelSelect">
-				<option value="claude-opus-4.5">Claude Opus 4.5</option>
-				<option value="gpt-5.2-codex">GPT-5.2 Codex</option>
+				<option value="">Loading...</option>
 			</select>
 		</div>
 		<div class="status">
@@ -577,16 +576,43 @@ export function getMobileUI(workspaceName: string): string {
 		let messages = [];
 		let workspaces = [];
 		let currentWorkspace = null;
-		let selectedModel = 'claude-opus-4.5';
+		let selectedModel = '';
+		let availableModels = [];
+
+		async function fetchModels() {
+			try {
+				const response = await fetch('/api/models');
+				if (response.ok) {
+					availableModels = await response.json();
+					renderModelOptions();
+				}
+			} catch (e) {
+				console.error('Failed to fetch models:', e);
+				modelSelect.innerHTML = '<option value="">No models available</option>';
+			}
+		}
+
+		function renderModelOptions() {
+			if (availableModels.length === 0) {
+				modelSelect.innerHTML = '<option value="">No models available</option>';
+				return;
+			}
+
+			modelSelect.innerHTML = availableModels.map(m =>
+				'<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.family || m.id) + '</option>'
+			).join('');
+
+			const saved = localStorage.getItem('copilotRemoteModel');
+			if (saved && availableModels.some(m => m.id === saved)) {
+				modelSelect.value = saved;
+				selectedModel = saved;
+			} else if (availableModels.length > 0) {
+				selectedModel = availableModels[0].id;
+				modelSelect.value = selectedModel;
+			}
+		}
 
 		function loadSavedModel() {
-			try {
-				const saved = localStorage.getItem('copilotRemoteModel');
-				if (saved) {
-					selectedModel = saved;
-					modelSelect.value = saved;
-				}
-			} catch (e) {}
 		}
 
 		function saveModel() {
@@ -598,7 +624,8 @@ export function getMobileUI(workspaceName: string): string {
 		modelSelect.addEventListener('change', function(e) {
 			selectedModel = e.target.value;
 			saveModel();
-			showToast('Model: ' + (selectedModel === 'claude-opus-4.5' ? 'Claude Opus 4.5' : 'GPT-5.2 Codex'));
+			const model = availableModels.find(m => m.id === selectedModel);
+			showToast('Model: ' + (model ? (model.name || model.family || model.id) : selectedModel));
 		});
 
 		function loadSavedWorkspace() {
@@ -778,6 +805,7 @@ export function getMobileUI(workspaceName: string): string {
 
 		loadSavedWorkspace();
 		loadSavedModel();
+		fetchModels();
 		connect();
 	</script>
 </body>
