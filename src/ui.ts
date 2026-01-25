@@ -445,6 +445,40 @@ export function getMobileUI(workspaceName: string): string {
 			transform: translateX(-50%) translateY(0);
 			opacity: 1;
 		}
+
+		.model-selector {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 8px 12px;
+			background: var(--bg);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			margin-right: 12px;
+		}
+
+		.model-selector select {
+			background: transparent;
+			border: none;
+			color: var(--text);
+			font-size: 13px;
+			font-family: inherit;
+			cursor: pointer;
+			outline: none;
+			padding-right: 4px;
+		}
+
+		.model-selector select option {
+			background: var(--surface);
+			color: var(--text);
+		}
+
+		.model-icon {
+			width: 16px;
+			height: 16px;
+			flex-shrink: 0;
+			opacity: 0.7;
+		}
 	</style>
 </head>
 <body>
@@ -461,6 +495,17 @@ export function getMobileUI(workspaceName: string): string {
 					<path d="M6 9l6 6 6-6"/>
 				</svg>
 			</div>
+		</div>
+		<div class="model-selector">
+			<svg class="model-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/>
+				<path d="M12 12v10"/>
+				<path d="M8 18h8"/>
+			</svg>
+			<select id="modelSelect">
+				<option value="claude-opus-4.5">Claude Opus 4.5</option>
+				<option value="gpt-5.2-codex">GPT-5.2 Codex</option>
+			</select>
 		</div>
 		<div class="status">
 			<div class="status-dot" id="statusDot"></div>
@@ -526,11 +571,35 @@ export function getMobileUI(workspaceName: string): string {
 		const windowModal = document.getElementById('windowModal');
 		const modalClose = document.getElementById('modalClose');
 		const serverItems = document.getElementById('serverItems');
+		const modelSelect = document.getElementById('modelSelect');
 
 		let ws = null;
 		let messages = [];
 		let workspaces = [];
 		let currentWorkspace = null;
+		let selectedModel = 'claude-opus-4.5';
+
+		function loadSavedModel() {
+			try {
+				const saved = localStorage.getItem('copilotRemoteModel');
+				if (saved) {
+					selectedModel = saved;
+					modelSelect.value = saved;
+				}
+			} catch (e) {}
+		}
+
+		function saveModel() {
+			try {
+				localStorage.setItem('copilotRemoteModel', selectedModel);
+			} catch (e) {}
+		}
+
+		modelSelect.addEventListener('change', function(e) {
+			selectedModel = e.target.value;
+			saveModel();
+			showToast('Model: ' + (selectedModel === 'claude-opus-4.5' ? 'Claude Opus 4.5' : 'GPT-5.2 Codex'));
+		});
 
 		function loadSavedWorkspace() {
 			try {
@@ -681,10 +750,12 @@ export function getMobileUI(workspaceName: string): string {
 			const prompt = promptInput.value.trim();
 			if (!prompt || !ws || ws.readyState !== WebSocket.OPEN || !currentWorkspace) return;
 
+			const currentModel = modelSelect.value;
 			ws.send(JSON.stringify({
 				type: 'prompt',
 				content: prompt,
-				workspaceId: currentWorkspace.id
+				workspaceId: currentWorkspace.id,
+				model: currentModel
 			}));
 
 			promptInput.value = '';
@@ -706,6 +777,7 @@ export function getMobileUI(workspaceName: string): string {
 		sendBtn.addEventListener('click', sendPrompt);
 
 		loadSavedWorkspace();
+		loadSavedModel();
 		connect();
 	</script>
 </body>

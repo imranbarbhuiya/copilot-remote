@@ -20,6 +20,7 @@ interface ChatMessage {
 	workspaceId?: string;
 	workspace?: Workspace;
 	data?: unknown;
+	model?: string;
 }
 
 interface ChatHistoryEntry {
@@ -85,14 +86,18 @@ function getChatHistory(workspaceId: string): ChatHistoryEntry[] {
 	return chatHistories.get(workspaceId)!;
 }
 
-async function executeLocalChat(prompt: string, workspaceId: string): Promise<void> {
-	log(`executeLocalChat: prompt="${prompt.slice(0, 50)}..." for workspace=${workspaceId}`);
+async function executeLocalChat(prompt: string, workspaceId: string, model?: string): Promise<void> {
+	log(`executeLocalChat: prompt="${prompt.slice(0, 50)}..." for workspace=${workspaceId} model=${model}`);
 
 	try {
-		await vscode.commands.executeCommand('workbench.action.chat.open', {
+		const options: Record<string, unknown> = {
 			query: prompt,
 			mode: 'agent',
-		});
+		};
+
+		if (model) options.modelSelector = { id: model };
+
+		await vscode.commands.executeCommand('workbench.action.chat.open', options);
 		log(`Chat opened successfully`);
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -100,44 +105,40 @@ async function executeLocalChat(prompt: string, workspaceId: string): Promise<vo
 	}
 }
 
-function handlePromptOnHost(prompt: string, workspaceId: string) {
-	log(`handlePromptOnHost: workspaceId=${workspaceId}`);
+function handlePromptOnHost(prompt: string, workspaceId: string, model?: string) {
+	log(`handlePromptOnHost: workspaceId=${workspaceId} model=${model}`);
 
 	const history = getChatHistory(workspaceId);
 	history.push({ role: 'user', content: prompt, timestamp: Date.now(), workspaceId });
 	broadcastToMobile({ type: 'history', data: history, workspaceId });
-	broadcastToMobile({ type: 'status', content: 'Processing...' });
+	broadcastToMobile({ type: 'status', content: 'Sending to Copilot...' });
 
 	const myWorkspaceId = getWorkspaceId();
 
 	if (workspaceId === myWorkspaceId) {
 		log(`Prompt is for host workspace, executing locally`);
-		void executeLocalChat(prompt, workspaceId);
-		broadcastToMobile({ type: 'status', content: 'Prompt sent to Copilot Chat' });
-		setTimeout(() => {
-			history.push({
-				role: 'assistant',
-				content: '[Response visible in VS Code - check the chat panel]',
-				timestamp: Date.now(),
-				workspaceId,
-			});
-			broadcastToMobile({ type: 'history', data: history, workspaceId });
-		}, 1_000);
+		void executeLocalChat(prompt, workspaceId, model);
+		history.push({
+			role: 'assistant',
+			content: '📍 Responding in VS Code chat panel',
+			timestamp: Date.now(),
+			workspaceId,
+		});
+		broadcastToMobile({ type: 'history', data: history, workspaceId });
+		broadcastToMobile({ type: 'status', content: 'Copilot is responding...' });
 	} else {
 		const clientWs = workspaceClients.get(workspaceId);
 		if (clientWs?.readyState === WebSocket.OPEN) {
 			log(`Forwarding prompt to client workspace: ${workspaceId}`);
-			clientWs.send(JSON.stringify({ type: 'execute', content: prompt, workspaceId }));
-			broadcastToMobile({ type: 'status', content: 'Prompt sent to Copilot Chat' });
-			setTimeout(() => {
-				history.push({
-					role: 'assistant',
-					content: '[Response visible in VS Code - check the chat panel]',
-					timestamp: Date.now(),
-					workspaceId,
-				});
-				broadcastToMobile({ type: 'history', data: history, workspaceId });
-			}, 1_000);
+			clientWs.send(JSON.stringify({ type: 'execute', content: prompt, workspaceId, model }));
+			history.push({
+				role: 'assistant',
+				content: '📍 Responding in VS Code chat panel',
+				timestamp: Date.now(),
+				workspaceId,
+			});
+			broadcastToMobile({ type: 'history', data: history, workspaceId });
+			broadcastToMobile({ type: 'status', content: 'Copilot is responding...' });
 		} else {
 			log(`No client found for workspace: ${workspaceId}`);
 			broadcastToMobile({ type: 'status', content: 'Error: Workspace not connected' });
@@ -234,7 +235,7 @@ function startAsHost(port: number): void {
 
 					if (message.type === 'prompt' && message.content) {
 						const wsId = message.workspaceId ?? getWorkspaceId();
-						handlePromptOnHost(message.content, wsId);
+						handlePromptOnHost(message.content, wsId, message.model);
 					}
 				} catch (error) {
 					log(`Error processing mobile client message: ${error}`);
@@ -294,7 +295,7 @@ function startAsClient(port: number): void {
 
 			if (message.type === 'execute' && message.content) {
 				log(`Received execute command: ${message.content.slice(0, 50)}...`);
-				void executeLocalChat(message.content, message.workspaceId ?? getWorkspaceId());
+				void executeLocalChat(message.content, message.workspaceId ?? getWorkspaceId(), message.model);
 			}
 		} catch (error) {
 			log(`Error processing message from host: ${error}`);
