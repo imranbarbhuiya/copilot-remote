@@ -6,9 +6,10 @@ Control VS Code's Copilot Chat from your phone. Send prompts and commands to you
 
 - 📱 Mobile-friendly web interface
 - 🔄 Real-time WebSocket connection
-- 💬 Send prompts to Agent, Ask, or Edit mode
-- ⚡ Quick action buttons
-- 📊 Chat history sync
+- 💬 Send prompts directly to Copilot Agent
+- 🪟 Multi-workspace support (manage multiple VS Code windows)
+- 🤖 Model selection (choose between available Copilot models)
+- 📊 Chat history sync per workspace
 - 🔗 QR code for easy phone setup
 
 ## Setup
@@ -51,17 +52,20 @@ The server auto-starts when VS Code opens. You can also:
 
 ### From Phone:
 
-1. Select mode (Agent, Ask, Edit) at the top
-2. Type your prompt or use quick action buttons
-3. Hit send - the prompt goes to VS Code's Copilot Chat
-4. Check VS Code on your computer for the response
+1. Select workspace from the dropdown (if multiple VS Code windows are open)
+2. Choose a Copilot model from the model selector
+3. Type your prompt in the input field
+4. Hit send - the prompt goes to VS Code's Copilot Chat
+5. Check VS Code on your computer for the response
 
-### Quick Actions:
+### Multi-Workspace Support:
 
-- **Explain** - Explain selected code
-- **Fix Error** - Fix the current error
-- **Tests** - Generate tests
-- **Refactor** - Clean up code
+When you have multiple VS Code windows open:
+
+- First window becomes the **host** server
+- Additional windows connect as **clients**
+- Switch between workspaces from your phone
+- Each workspace maintains separate chat history
 
 ## Configuration
 
@@ -82,24 +86,26 @@ In VS Code settings:
 
 ### HTTP Endpoints
 
-| Endpoint      | Method | Description          |
-| ------------- | ------ | -------------------- |
-| `/`           | GET    | Mobile web interface |
-| `/api/health` | GET    | Server status check  |
-| `/api/prompt` | POST   | Send prompt to chat  |
+| Endpoint          | Method | Description                   |
+| ----------------- | ------ | ----------------------------- |
+| `/`               | GET    | Mobile web interface          |
+| `/api/health`     | GET    | Server status check           |
+| `/api/workspaces` | GET    | List connected workspaces     |
+| `/api/models`     | GET    | List available Copilot models |
 
 ### WebSocket Messages
 
 Send:
 
 ```json
-{ "type": "prompt", "content": "your prompt" }
+{ "type": "prompt", "content": "your prompt", "workspaceId": "...", "model": "gpt-4o" }
 ```
 
 Receive:
 
 ```json
-{ "type": "history", "data": [...] }
+{ "type": "workspaces", "data": [{"id": "...", "name": "..."}] }
+{ "type": "history", "data": [...], "workspaceId": "..." }
 { "type": "status", "content": "message" }
 ```
 

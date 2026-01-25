@@ -28,11 +28,12 @@ Mobile Device ──HTTP/WS──▶ Host Window (port 3847)
 
 ## HTTP Endpoints
 
-| Endpoint          | Method | Purpose                   |
-| ----------------- | ------ | ------------------------- |
-| `/`               | GET    | Serves mobile web UI      |
-| `/api/health`     | GET    | Health check + workspace  |
-| `/api/workspaces` | GET    | List connected workspaces |
+| Endpoint          | Method | Purpose                       |
+| ----------------- | ------ | ----------------------------- |
+| `/`               | GET    | Serves mobile web UI          |
+| `/api/health`     | GET    | Health check + workspace      |
+| `/api/workspaces` | GET    | List connected workspaces     |
+| `/api/models`     | GET    | List available Copilot models |
 
 ## WebSocket Protocol
 
@@ -51,7 +52,7 @@ Mobile Device ──HTTP/WS──▶ Host Window (port 3847)
 ### Mobile → Host
 
 ```json
-{ "type": "prompt", "content": "your prompt", "workspaceId": "file:///path/to/workspace" }
+{ "type": "prompt", "content": "your prompt", "workspaceId": "file:///path/to/workspace", "model": "gpt-4o" }
 ```
 
 ### Host → Mobile

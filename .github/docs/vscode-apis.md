@@ -13,7 +13,7 @@ vscode.commands.executeCommand('workbench.action.chat.open', {
   toolIds?: string[],              // Attach tools
   attachFiles?: URI[],             // Attach files as context
   attachScreenshot?: boolean,      // Capture screen
-  modelSelector?: { id: string, vendor: string }, // Pick model
+  modelSelector?: { id: string }, // Pick model by ID
 });
 ```
 
@@ -23,37 +23,53 @@ vscode.commands.executeCommand('workbench.action.chat.open', {
 
 ```typescript
 interface IChatViewOpenOptions {
-  query: string;
-  isPartialQuery?: boolean;
-  toolIds?: string[];
-  previousRequests?: IChatViewOpenRequestEntry[];
-  attachScreenshot?: boolean;
-  attachFiles?: (URI | { uri: URI; range: IRange })[];
-  attachHistoryItemChanges?: { uri: URI; historyItemId: string }[];
-  attachHistoryItemChangeRanges?: {
-    start: { uri: URI; historyItemId: string };
-    end: { uri: URI; historyItemId: string };
-  }[];
-  mode?: ChatModeKind | string;
-  modelSelector?: ILanguageModelChatSelector;
-  blockOnResponse?: boolean;
+	query: string;
+	isPartialQuery?: boolean;
+	toolIds?: string[];
+	previousRequests?: IChatViewOpenRequestEntry[];
+	attachScreenshot?: boolean;
+	attachFiles?: (URI | { uri: URI; range: IRange })[];
+	attachHistoryItemChanges?: { uri: URI; historyItemId: string }[];
+	attachHistoryItemChangeRanges?: {
+		start: { uri: URI; historyItemId: string };
+		end: { uri: URI; historyItemId: string };
+	}[];
+	mode?: ChatModeKind | string;
+	modelSelector?: ILanguageModelChatSelector;
+	blockOnResponse?: boolean;
 }
 ```
 
 ## Other Useful Commands
 
-| Command | Purpose |
-|---------|---------|
-| `vscode.editorChat.start` | Opens inline chat in editor |
-| `workbench.action.chat.newChat` | Starts fresh chat session |
-| `workbench.action.chat.open` | Opens chat with options |
+| Command                         | Purpose                     |
+| ------------------------------- | --------------------------- |
+| `vscode.editorChat.start`       | Opens inline chat in editor |
+| `workbench.action.chat.newChat` | Starts fresh chat session   |
+| `workbench.action.chat.open`    | Opens chat with options     |
+
+## Language Model API
+
+Used to fetch available Copilot models for the model selector:
+
+```typescript
+const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+const modelList = models.map((m) => ({
+	id: m.id,
+	name: m.name,
+	family: m.family,
+	vendor: m.vendor,
+}));
+```
+
+Returns an array of `LanguageModelChat` objects. The `id` can be passed to `modelSelector` in the chat open command.
 
 ## Inline Chat API
 
 ```typescript
 vscode.commands.executeCommand('vscode.editorChat.start', {
-  autoSend: true,
-  message: string,
+	autoSend: true,
+	message: string,
 });
 ```
 

@@ -42,7 +42,7 @@
 				},
 				"copilotRemote.autoStart": {
 					"type": "boolean",
-					"default": true,
+					"default": false,
 					"description": "Automatically start server when VS Code opens"
 				}
 			}

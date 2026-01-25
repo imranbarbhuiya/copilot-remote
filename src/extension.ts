@@ -489,7 +489,7 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	const config = vscode.workspace.getConfiguration('copilotRemote');
-	if (config.get<boolean>('autoStart', true)) {
+	if (config.get<boolean>('autoStart', false)) {
 		log(`autoStart enabled, calling startServer`);
 		startServer();
 	}
