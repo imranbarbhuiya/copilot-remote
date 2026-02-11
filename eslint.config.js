@@ -1,7 +1,8 @@
 import common from 'eslint-config-mahir/common';
-import edge from 'eslint-config-mahir/edge';
 import module from 'eslint-config-mahir/module';
 import node from 'eslint-config-mahir/node';
+import react from 'eslint-config-mahir/react';
+import tailwind from 'eslint-config-mahir/tailwind';
 import typescript from 'eslint-config-mahir/typescript';
 
 /**
@@ -12,20 +13,21 @@ export default [
 	...node,
 	...typescript,
 	...module,
-	...edge,
+	...react,
+	...tailwind,
 	{
-		ignores: ['.github', '.yarn', 'node_modules', 'dist'],
-		languageOptions: {
-			parserOptions: {
-				projectService: {
-					allowDefaultProject: ['eslint.config.js'],
-				},
-			},
-		},
+		ignores: ['.github', '.yarn', 'node_modules', 'dist', 'build', 'src/routeTree.gen.ts'],
 	},
 	{
 		rules: {
 			'id-length': 'off',
+		},
+	},
+	{
+		settings: {
+			'better-tailwindcss': {
+				entryPoint: 'src/styles.css',
+			},
 		},
 	},
 ];

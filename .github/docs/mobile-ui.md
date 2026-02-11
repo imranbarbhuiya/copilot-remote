@@ -1,93 +1,124 @@
 # Mobile UI
 
-## Design Decisions
+## Tech Stack
 
-### Why Inline HTML?
+- **React 19** - UI library
+- **TanStack Router** - File-based routing with type-safe navigation
+- **Tailwind CSS v4** - Utility-first styling
 
-The mobile UI is served as a string from `src/ui.ts` rather than static files because:
+## Project Structure
 
-1. No build step needed
-2. Single-file delivery
-3. Extension bundles cleanly
+```
+src/
+├── routes/
+│   ├── __root.tsx      # Root layout with <html>, <head>, <body>
+│   ├── index.tsx       # Main chat page
+│   └── api/-ws.ts      # WebSocket endpoint
+├── lib/
+│   └── copilot-bridge.ts   # Copilot SDK wrapper
+└── styles.css          # Tailwind imports and custom CSS
+```
 
-### Mobile-First CSS
+## Route Definitions
+
+Routes use TanStack Router's `createFileRoute`:
+
+```typescript
+export const Route = createFileRoute('/')({
+	component: ChatPage,
+	head: () => ({ meta: [{ title: 'Copilot Remote' }] }),
+	loader: () => checkCli(),
+});
+```
+
+The loader checks CLI status before rendering, displaying setup instructions if needed.
+
+## Mobile-First Design
+
+### PWA Meta Tags
+
+```typescript
+head: () => ({
+  meta: [
+    { name: 'viewport', content: 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no' },
+    { name: 'apple-mobile-web-app-capable', content: 'yes' },
+    { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+    { name: 'theme-color', content: '#1e1e1e' },
+  ],
+}),
+```
+
+### Safe Area Handling
+
+Input area respects iPhone notch/home indicator:
 
 ```css
-:root {
-	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
-}
+padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
 ```
-
-Handles iPhone notch/home indicator with CSS environment variables.
-
-### PWA-Ready Meta Tags
-
-```html
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-```
-
-Can be added to home screen for app-like experience.
 
 ## UI Components
 
-### Workspace Selector
+### Chat Container
 
-Dropdown in header to switch between connected VS Code workspaces. Remembers last selected workspace in localStorage.
+Scrollable message list with auto-scroll on new messages. Uses `useRef` to track container and scroll to bottom on updates.
 
-### Model Selector
+### Message Bubbles
 
-Dropdown to choose between available Copilot models. Models are fetched from `/api/models` endpoint. Selection persists in localStorage.
+- User messages: Right-aligned, primary color background
+- Assistant messages: Left-aligned, surface color with border
 
-### Input Area
+### Tool Call Cards
 
-Auto-expanding textarea with send button. Enter to submit, Shift+Enter for newline.
+Distinct styling for tool execution:
 
-### Chat History
+- Tool calls: Green border with tool icon
+- Tool results: Blue border with checkmark
 
-Messages displayed with timestamps, user messages right-aligned, assistant left-aligned. History is workspace-specific.
+### Streaming Indicator
 
-### Workspace Modal
+Blinking cursor during streaming, thinking dots during reasoning.
 
-Full-screen modal showing all connected workspaces with status indicators. Tap to switch workspaces.
+## State Management
 
-## WebSocket Reconnection
+React hooks manage all client state:
 
-```javascript
-ws.onclose = () => {
-	statusDot.classList.remove('connected');
-	setTimeout(connect, 2000); // Auto-reconnect after 2s
-};
+```typescript
+const [messages, setMessages] = useState<Message[]>([]);
+const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
+const [isStreaming, setIsStreaming] = useState(false);
+const [streamingContent, setStreamingContent] = useState('');
+const [isThinking, setIsThinking] = useState(false);
+```
+
+## WebSocket Connection
+
+Established on component mount, reconnects automatically:
+
+```typescript
+useEffect(() => {
+	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+	const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+	wsRef.current = ws;
+	// ...event handlers
+	return () => ws.close();
+}, []);
 ```
 
 ## Color Scheme
 
-VS Code dark theme colors:
+VS Code dark theme inspired:
 
-- Background: `#1e1e1e`
-- Surface: `#252526`
-- Primary: `#0078d4`
-- Text: `#cccccc`
-- Muted: `#808080`
+| Variable       | Value     | Usage           |
+| -------------- | --------- | --------------- |
+| `--bg`         | `#1e1e1e` | Background      |
+| `--surface`    | `#252526` | Cards, header   |
+| `--primary`    | `#0078d4` | Buttons, accent |
+| `--text`       | `#cccccc` | Primary text    |
+| `--text-muted` | `#808080` | Secondary text  |
 
 ## Animations
 
-Slide-in animation for new messages:
+Defined in CSS with Tailwind's `animate-` utilities:
 
-```css
-@keyframes slideIn {
-	from {
-		opacity: 0;
-		transform: translateY(10px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
-}
-```
-
-## QR Code Webview
-
-QR code is generated server-side using the `qrcode` npm package and rendered as SVG in a VS Code webview panel. The SVG is embedded directly in HTML with a white background for optimal scanning.
+- `thinking` - Bouncing dots for thinking state
+- `blink` - Cursor blink during streaming

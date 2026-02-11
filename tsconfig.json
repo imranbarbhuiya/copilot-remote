@@ -1,17 +1,38 @@
 {
-  "compilerOptions": {
-    "module": "commonjs",
-    "target": "ES2022",
-    "outDir": "out",
-    "rootDir": "src",
-    "lib": ["ES2022"],
-    "sourceMap": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", ".vscode-test"]
+	"compilerOptions": {
+		"target": "esnext",
+		"lib": ["dom", "dom.iterable", "esnext"],
+		"allowJs": true,
+		"strict": true,
+		"forceConsistentCasingInFileNames": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"module": "esnext",
+		"noImplicitAny": true,
+		"strictNullChecks": true,
+		"noImplicitThis": true,
+		"alwaysStrict": true,
+		"noUnusedLocals": true,
+		"removeComments": true,
+		"sourceMap": true,
+		"allowUnreachableCode": false,
+		"allowUnusedLabels": false,
+		"exactOptionalPropertyTypes": false,
+		"noImplicitOverride": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUnusedParameters": true,
+		"pretty": true,
+		"moduleResolution": "bundler",
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"jsx": "react-jsx",
+		"incremental": true,
+		"skipLibCheck": true,
+		"verbatimModuleSyntax": true,
+		"paths": {
+			"~/*": ["./src/*"]
+		}
+	},
+	"include": ["**/*.ts", "**/*.tsx", "*.js", "*.cjs", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],
+	"exclude": ["node_modules"]
 }

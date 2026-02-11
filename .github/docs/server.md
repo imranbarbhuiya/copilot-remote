@@ -2,123 +2,113 @@
 
 ## Overview
 
-The extension runs a dual HTTP/WebSocket server inside VS Code's Node.js environment. Since each VS Code window runs in an isolated process with separate memory, the extension uses a host/client architecture to support multiple windows.
+The app runs on TanStack Start with Vite as the build tool. Server functions and server routes provide the API layer, with HTTP streaming (SSE) for real-time Copilot responses.
 
-## Host/Client Model
+## Architecture
 
 ```
-Mobile Device ──HTTP/WS──▶ Host Window (port 3847)
+Browser ──HTTP/SSE──▶ TanStack Start Server (port 3000)
                               │
-                              ├── Host's own workspace
-                              │
-                              └──WS──▶ Client Window 1 (/workspace)
-                              └──WS──▶ Client Window 2 (/workspace)
+                              └──▶ CopilotBridge ──▶ Copilot SDK ──▶ CLI
 ```
 
-1. **First window (Host)**: Starts HTTP server on port 3847, serves mobile UI, manages all workspace connections
-2. **Additional windows (Clients)**: Detect port in use, connect to host via WebSocket at `/workspace`, register their workspace
+## Server Routes
 
-### Key Components
+API routes are defined using TanStack Start's server routes. The chat endpoint is at `src/routes/api/chat.ts`.
 
-- `startAsHost(port)`: Creates HTTP server + WebSocket server, registers own workspace
-- `startAsClient(port)`: Connects to existing host, registers workspace via WebSocket
-- `tryStartServer(port)`: Tests if port available; if EADDRINUSE, becomes client instead
-- `workspaceClients`: Map of workspace ID → WebSocket connection (for forwarding prompts)
-- `mobileClients`: Set of mobile device WebSocket connections
-
-## HTTP Endpoints
-
-| Endpoint          | Method | Purpose                       |
-| ----------------- | ------ | ----------------------------- |
-| `/`               | GET    | Serves mobile web UI          |
-| `/api/health`     | GET    | Health check + workspace      |
-| `/api/workspaces` | GET    | List connected workspaces     |
-| `/api/models`     | GET    | List available Copilot models |
-
-## WebSocket Protocol
-
-### Message Types
-
-| Type         | Direction     | Purpose                                |
-| ------------ | ------------- | -------------------------------------- |
-| `register`   | Client → Host | Register workspace with host           |
-| `unregister` | Client → Host | Remove workspace on disconnect         |
-| `workspaces` | Host → Mobile | List of all connected workspaces       |
-| `prompt`     | Mobile → Host | Send prompt to specific workspace      |
-| `execute`    | Host → Client | Forward prompt to client for execution |
-| `history`    | Host → Mobile | Chat history for workspace             |
-| `status`     | Host → Mobile | Status updates                         |
-
-### Mobile → Host
-
-```json
-{ "type": "prompt", "content": "your prompt", "workspaceId": "file:///path/to/workspace", "model": "gpt-4o" }
-```
-
-### Host → Mobile
-
-```json
-{ "type": "workspaces", "data": [{ "id": "...", "name": "...", "uri": "..." }] }
-{ "type": "history", "data": [...], "workspaceId": "..." }
-{ "type": "status", "content": "Processing..." }
-```
-
-### Host ↔ Client
-
-```json
-{ "type": "register", "workspace": { "id": "...", "name": "...", "uri": "..." } }
-{ "type": "execute", "content": "prompt text", "workspaceId": "..." }
-```
-
-## Network Binding
-
-Server binds to `0.0.0.0` to accept connections from any device on the local network:
+### Streaming Chat Handler
 
 ```typescript
-server.listen(port, '0.0.0.0', callback);
+import { createFileRoute } from '@tanstack/react-router';
+import * as CopilotBridge from '~/lib/copilot-bridge';
+
+export const Route = createFileRoute('/api/chat')({
+	server: {
+		handlers: {
+			POST: async ({ request }) => {
+				const body = await request.json();
+				const stream = CopilotBridge.sendMessageStream(body.sessionId, body.prompt, body.model);
+
+				return new Response(stream, {
+					headers: {
+						'Content-Type': 'text/event-stream',
+						'Cache-Control': 'no-cache',
+						Connection: 'keep-alive',
+					},
+				});
+			},
+		},
+	},
+});
 ```
 
-## IP Detection
+## HTTP Streaming Protocol
 
-Uses `os.networkInterfaces()` to find the local IP for QR code generation:
+### Client → Server (POST /api/chat)
 
-```typescript
-function getLocalIP(): string {
-	const interfaces = os.networkInterfaces();
-	for (const name of Object.keys(interfaces)) {
-		for (const iface of interfaces[name] || []) {
-			if (iface.family === 'IPv4' && !iface.internal) {
-				return iface.address;
-			}
-		}
-	}
-	return '127.0.0.1';
+```json
+{
+	"sessionId": "session-123",
+	"prompt": "your prompt",
+	"model": "gpt-4.1"
 }
 ```
 
-## Dependencies
+### Server → Client (SSE Stream)
 
-- `ws` - WebSocket server implementation
-- `qrcode` - QR code generation
+Stream events are sent as Server-Sent Events:
 
-## State Management
+```
+data: {"type":"delta","content":"streaming text..."}
 
-Global state managed at module level:
+data: {"type":"thinking"}
 
-```typescript
-let server: http.Server | null = null;
-let wss: WebSocketServer | null = null;
-let clientWs: WebSocket | null = null;
-let isHost = false;
-const mobileClients: Set<WebSocket> = new Set();
-const workspaceClients: Map<string, WebSocket> = new Map();
-const workspaces: Map<string, Workspace> = new Map();
-const chatHistories: Map<string, ChatHistoryEntry[]> = new Map();
+data: {"type":"tool_call","toolName":"read_file","toolParams":{...}}
+
+data: {"type":"tool_result","toolName":"read_file","toolResult":"..."}
+
+data: {"type":"idle"}
+
+data: {"type":"error","content":"error message"}
 ```
 
-## Lifecycle
+## Server Functions
 
-1. **Activation**: Extension activates on `onStartupFinished`
-2. **Auto-start**: Server starts if `copilotRemote.autoStart` is true
-3. **Port check**: If port 3847 in use, becomes client instead of host
-4. **Deactivation**: Server/client stops, WebSocket connections closed
+TanStack Start uses `createServerFn` for server-side logic that can be called from React components:
+
+```typescript
+const listSessionsFn = createServerFn({ method: 'GET' }).handler(async () => {
+	return CopilotBridge.listSessions();
+});
+
+const deleteSessionFn = createServerFn({ method: 'POST' })
+	.validator((data: { sessionId: string }) => data)
+	.handler(async ({ data }) => {
+		return CopilotBridge.deleteSession(data.sessionId);
+	});
+```
+
+These are called directly from components for session management operations.
+
+## Network Binding
+
+The Vite dev server binds to `0.0.0.0` to accept connections from any device on the local network:
+
+```typescript
+export default defineConfig({
+	server: {
+		port: 3000,
+		host: '0.0.0.0',
+	},
+});
+```
+
+## Session Management
+
+Each browser tab creates a unique session ID (`session-{timestamp}`). Sessions persist across multiple messages and can be resumed from disk using the Copilot SDK's persistence features.
+
+## Dependencies
+
+- `@tanstack/react-start` - Meta-framework with SSR, server routes, and server functions
+- `@github/copilot-sdk` - Copilot integration
+- `vite` - Build tool and dev server

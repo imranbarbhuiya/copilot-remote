@@ -1,72 +1,40 @@
 {
 	"name": "copilot-remote",
-	"displayName": "Copilot Remote Control",
-	"description": "Control VS Code Copilot Chat from your phone via HTTP API",
 	"version": "0.1.0",
-	"publisher": "sofi",
-	"engines": {
-		"vscode": "^1.95.0"
-	},
-	"categories": [
-		"Other"
-	],
-	"activationEvents": [
-		"onStartupFinished"
-	],
-	"main": "./out/extension.js",
-	"contributes": {
-		"commands": [
-			{
-				"command": "copilot-remote.start",
-				"title": "Start Remote Server",
-				"category": "Copilot Remote"
-			},
-			{
-				"command": "copilot-remote.stop",
-				"title": "Stop Remote Server",
-				"category": "Copilot Remote"
-			},
-			{
-				"command": "copilot-remote.showQR",
-				"title": "Show QR Code for Phone",
-				"category": "Copilot Remote"
-			}
-		],
-		"configuration": {
-			"title": "Copilot Remote",
-			"properties": {
-				"copilotRemote.port": {
-					"type": "number",
-					"default": 3847,
-					"description": "Port for the remote control server"
-				},
-				"copilotRemote.autoStart": {
-					"type": "boolean",
-					"default": false,
-					"description": "Automatically start server when VS Code opens"
-				}
-			}
-		}
-	},
+	"description": "Control Copilot from remote",
+	"type": "module",
 	"scripts": {
-		"vscode:prepublish": "bun run compile",
-		"compile": "tsc -p ./",
-		"watch": "tsc -watch -p ./",
+		"dev": "vite dev",
+		"build": "vite build",
+		"start": "node .output/server/index.mjs",
 		"lint": "TIMING=1 eslint --cache .",
 		"format": "prettier --write --cache --experimental-cli ."
 	},
-	"devDependencies": {
-		"@types/node": "^20.19.30",
-		"@types/qrcode": "^1.5.6",
-		"@types/vscode": "^1.108.1",
-		"@types/ws": "^8.18.1",
-		"eslint": "^9.39.2",
-		"eslint-config-mahir": "^1.1.5",
-		"prettier": "^3.8.1",
-		"typescript": "^5.9.3"
-	},
 	"dependencies": {
+		"@github/copilot-sdk": "^0.1.23",
+		"@tailwindcss/vite": "^4.1.18",
+		"@tanstack/react-router": "^1.159.5",
+		"@tanstack/react-start": "^1.159.5",
 		"qrcode": "^1.5.4",
-		"ws": "^8.19.0"
+		"react": "^19.2.4",
+		"react-dom": "^19.2.4",
+		"tailwindcss": "^4.1.18"
+	},
+	"devDependencies": {
+		"@types/node": "^20.19.33",
+		"@types/qrcode": "^1.5.6",
+		"@types/react": "^19.2.14",
+		"@types/react-dom": "^19.2.3",
+		"@vitejs/plugin-react": "^5.1.4",
+		"eslint": "^9.39.2",
+		"eslint-config-mahir": "^1.1.6",
+		"eslint-plugin-better-tailwindcss": "^4.2.0",
+		"prettier": "^3.8.1",
+		"typescript": "^5.9.3",
+		"vite": "^7.3.1",
+		"vite-tsconfig-paths": "^6.1.0"
+	},
+	"overrides": {
+		"zod-validation-error": "5.0.0"
 	}
 }
